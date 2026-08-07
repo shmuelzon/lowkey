@@ -1,0 +1,8 @@
+# Outputs
+build/
+/factory_data.*
+
+# General
+*.swp
+*.swo
+tags

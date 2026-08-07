@@ -1,0 +1,6 @@
+/*
+ * LowKey PCB revision B — DRV8871 H-bridge. Same IN1/IN2 as rev A but no
+ * nSLEEP input; it sleeps automatically when both are idle. Omitting
+ * nsleep-gpios, optional in the binding, is the entire delta from the base
+ * .dts, so this file deliberately adds no nodes.
+ */

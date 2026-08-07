@@ -1,0 +1,552 @@
+mainmenu "LowKey application"
+
+config LOCK_MOTOR_TIMEOUT_MS
+	int "Motor timeout in milliseconds"
+	default 3000
+	help
+	  Maximum time the motor will run before the lock is declared jammed.
+	  If the target sensor does not engage within this time, the motor is
+	  stopped and the state transitions to JAMMED.
+
+config LOCK_MOTOR_BRAKE_US
+	int "Motor brake duration in microseconds"
+	default 2000
+	help
+	  When the motor stops, both H-bridge inputs are driven high for this
+	  duration to apply dynamic braking (shorting the motor terminals)
+	  before coasting. This kills the motor's inertia so the bolt does not
+	  overshoot its end position. The same brake is applied before reversing
+	  direction to let the motor current decay. Set to 0 to disable braking
+	  and coast to a stop.
+
+config LOCK_BOLT_SEATING_MS
+	int "Bolt seating duration in milliseconds"
+	default 100
+	help
+	  After the lock sensor triggers during a lock operation, the motor
+	  continues to run for this duration to fully seat the bolt into the
+	  strike. This travel is away from the latch, so overshoot here is
+	  harmless. Measured from the sensor interrupt: the position sensors
+	  are not debounced, so this is the whole post-endstop travel.
+
+config LOCK_UNBOLT_SEATING_MS
+	int "Unbolt seating duration in milliseconds"
+	default 0
+	help
+	  After the unlock sensor triggers during an unlock (unbolt) operation,
+	  the motor continues to run for this duration. Unlike bolt seating,
+	  this travel is toward the latch mechanism, so any non-zero value moves
+	  the bolt closer to (or into) releasing the latch. Keep at 0 to stop
+	  the motor as soon as the bolt is retracted. Latch release is handled
+	  separately by the open action (LOCK_LATCH_RELEASE_MS).
+
+config LOCK_LATCH_RELEASE_MS
+	int "Latch release duration in milliseconds"
+	default 500
+	help
+	  When opening (unlock + latch release), the motor continues to run
+	  for this duration after the unlock sensor engages to retract the
+	  bolt past the latch mechanism, allowing the door to be opened.
+
+	  This is also exactly how long the lock is unlatched, and so how long
+	  the door can be pushed open: the latch is spring loaded and pops
+	  back out the moment the motor releases the cam. The lock reports
+	  unlatched for this window and unlocked afterwards, with the bolt
+	  staying retracted either way.
+
+	  Set to 0 to disable latch release entirely, which makes an open
+	  behave as a plain unbolt and report itself as such. Matter builds
+	  reject that, because the data model advertises the Unbolting
+	  feature — see the BUILD_ASSERT in src/matter/matter_radio.cpp.
+
+config LOCK_BATTERY_POLL_INTERVAL_S
+	int "Battery polling interval in seconds"
+	default 60
+	help
+	  How often to read the MAX17205 fuel gauge registers for battery
+	  level reporting. The ModelGauge m5 algorithm runs continuously in
+	  hardware; polling only reads the computed SOC and voltage values.
+
+config LOCK_BUTTON_DEBOUNCE_MS
+	int "Button debounce delay in milliseconds"
+	default 30
+	help
+	  Software debounce delay for the user keys (key0, key1). Only the
+	  mechanical switches are debounced; the Hall-effect sensors and the
+	  charger status pins are solid-state outputs that do not bounce, and
+	  are handled on the interrupt directly (see gpio_input_init()).
+
+config LOCK_WATCHDOG_TIMEOUT_MS
+	int "Watchdog timeout in milliseconds"
+	default 30000
+	help
+	  Per-channel task watchdog timeout. A monitored thread that fails to
+	  feed its channel within this period resets the SoC.
+
+	  Must stay above the 10 s HCI command timeout (HCI_CMD_TIMEOUT in
+	  Zephyr's hci_core.c): the advertising and TX-power paths issue
+	  blocking HCI commands from the system workqueue, so a controller
+	  that stops answering would otherwise reset a healthy device.
+
+config LOCK_WATCHDOG_FEED_MS
+	int "Watchdog feed interval in milliseconds"
+	default 5000
+	help
+	  How often each monitored thread feeds its channel.
+
+config LOCK_DISCOVERY_TIMEOUT_S
+	int "Discovery timeout in seconds"
+	default 180 if LOCK_RADIO_MATTER
+	default 60
+	help
+	  How long the device remains discoverable to new devices after a
+	  button press. Already-bonded devices can connect at any time.
+
+	  With Matter enabled this is 180 s so that both onboarding paths
+	  opened by one button press close together. Matter clamps its
+	  commissioning window up to its own three-minute minimum whatever it
+	  is asked for (see matter_start_discovery() in
+	  src/matter/matter_radio.cpp), so a shorter BLE window would leave
+	  the lock commissionable after the LED had stopped saying so.
+
+config LOCK_DISCOVERY_PRESS_MS
+	int "Discovery button hold time in milliseconds"
+	default 1500
+	help
+	  How long the button must be held to trigger discovery.
+
+config LOCK_FACTORY_RESET_PRESS_MS
+	int "Factory reset button hold time in milliseconds"
+	default 10000
+	help
+	  How long the button must be held to trigger a factory reset.
+	  All bonding/commissioning data is erased and the device reboots.
+
+config LOCK_BLE_TX_POWER_DBM
+	int "BLE TX output power in dBm"
+	depends on BT
+	default 7 if LOCK_RADIO_BLE
+	default 0
+	help
+	  Radio TX output power for BLE, applied to the advertiser at init
+	  and to each connection as it comes up. 0 leaves the controller at
+	  its own default and skips the command entirely.
+
+	  Applied at runtime because Zephyr's CONFIG_BT_CTLR_TX_PWR_* choice
+	  reaches only the software link layer; on the SoftDevice Controller it
+	  is silently ignored. The knob that works is the vendor-specific HCI
+	  Write Tx Power Level command, so a non-zero value here also needs
+	  CONFIG_BT_CTLR_TX_PWR_DYNAMIC_CONTROL=y.
+
+	  Must be a level the SoC supports or the controller rejects the
+	  command outright. +7 is the ceiling for the QFN part on this board;
+	  the datasheet's +8 dBm is characterised for the CSP package only.
+
+# ─────────────────────────────────────────────────────────────────────
+# Radio backends
+# ─────────────────────────────────────────────────────────────────────
+# Both radios on is the product default: Matter over Thread as the primary
+# path, the custom BLE GATT services as a local fallback that still works when
+# the Thread mesh or the controller is down.
+#
+# All protocol-specific configuration lives here rather than in prj_*.conf
+# fragments, so a build is described by the board plus these two switches. Two
+# rules make that work:
+#
+#   * Defaults here beat the Zephyr and NCS ones, because this file is parsed
+#     before Kconfig.zephyr and the CHIP fragments sourced at the bottom.
+#   * `select` to switch a subsystem on, `default` only for values. A
+#     `default y` on a symbol with unmet dependencies resolves silently to n
+#     and drops the feature; a `select` makes Kconfig complain.
+
+config LOCK_RADIO_BLE
+	bool "BLE radio backend (lock, door and battery GATT services)"
+	default y
+	select BT
+	select BT_PERIPHERAL
+	select BT_SMP
+	select BT_APP_PASSKEY
+	select BT_SETTINGS
+	select BT_KEYS_OVERWRITE_OLDEST
+	select BT_FILTER_ACCEPT_LIST
+	select BT_EXT_ADV
+	select BT_BAS
+	select BT_DIS
+	select BT_DIS_SETTINGS
+	select BT_DIS_MANUF_NAME
+	select BT_DIS_MODEL_NUMBER
+	select BT_DIS_SERIAL_NUMBER
+	select BT_DIS_HW_REV
+	select BT_DIS_FW_REV
+	select SETTINGS_RUNTIME
+	select BT_CTLR_TX_PWR_DYNAMIC_CONTROL
+	# So build_adv_data() can put the per-device name in the GAP name as
+	# well as the advertisement. Only when BLE is the only radio: a
+	# combined build shares the GAP name with Matter and has to leave it
+	# generic — see the comment on BT_DEVICE_NAME below.
+	select BT_DEVICE_NAME_DYNAMIC if !LOCK_RADIO_MATTER
+	# DFU over Bluetooth SMP. In a combined build CHIP_DFU_OVER_BT_SMP
+	# selects this same set and adds arbitration against Matter OTA; these
+	# selects are what make SMP work in a BLE-only build, where that
+	# symbol does not exist.
+	select ZCBOR
+	select MCUMGR
+	select MCUMGR_TRANSPORT_BT
+	select MCUMGR_TRANSPORT_BT_CONN_PARAM_CONTROL
+	select MCUMGR_TRANSPORT_BT_REASSEMBLY
+	select MCUMGR_GRP_IMG
+	select MCUMGR_GRP_OS
+	select MCUMGR_GRP_OS_BOOTLOADER_INFO
+	help
+	  Custom GATT services for lock control, door state and battery level,
+	  plus firmware update over Bluetooth SMP. This is a local control
+	  path that needs no Matter fabric and no working Thread mesh, and it
+	  is the only control path in a home with no Matter ecosystem.
+
+config LOCK_RADIO_MATTER
+	bool "Matter over Thread radio backend"
+	default y
+	select CHIP
+	help
+	  Matter Door Lock and Power Source clusters over Thread, commissioned
+	  over Bluetooth. The primary control path when the home has a Matter
+	  ecosystem.
+
+# The compile-time base name. The lock service's advertisement always appends a
+# per-device suffix taken from the factory-data serial ("LowKey-21C4").
+#
+# In a BLE-only build build_adv_data() also writes the suffixed name back as the
+# GAP name, so the GATT Device Name — which is what a phone shows once it has
+# bonded, in place of the advertised Local Name — identifies the individual
+# lock. With Matter built in it has to stay generic instead: Matter puts the GAP
+# name in its commissioning scan response, and a per-device name there would
+# leave a scanner showing two similarly named entries of which only one carries
+# the lock service.
+config BT_DEVICE_NAME
+	default "LowKey" if BT
+
+# Zephyr turns this on by default as soon as the name is dynamic, which would
+# let any bonded peer rename the lock over GATT. The name is derived from
+# factory data and rebuilt on every boot, so such a write is silently reverted
+# at the next reset and the device stops matching its own sticker in between.
+config BT_DEVICE_NAME_GATT_WRITABLE
+	default n
+
+if LOCK_RADIO_BLE
+
+# Preferred connection interval of 250 ms (200 * 1.25 ms). Balances
+# responsiveness (lock commands arrive within 250 ms) against battery draw
+# (~4 radio wake-ups/s instead of ~10 at the default 100 ms).
+#
+# Only applied when BLE is the only radio. In a combined build these are
+# global and would also slow Matter commissioning, which wants the 45 ms
+# that Matter's own defaults ask for — so there our links request 250 ms
+# per-connection from the advertising set's connected callback instead.
+if !LOCK_RADIO_MATTER
+
+config BT_PERIPHERAL_PREF_MIN_INT
+	default 200
+
+config BT_PERIPHERAL_PREF_MAX_INT
+	default 200
+
+config BT_PERIPHERAL_PREF_LATENCY
+	default 0
+
+config BT_PERIPHERAL_PREF_TIMEOUT
+	default 400
+
+endif # !LOCK_RADIO_MATTER
+
+config BT_GAP_AUTO_UPDATE_CONN_PARAMS
+	default y
+
+config BT_MAX_PAIRED
+	default 5
+
+# DIS is populated at runtime from factory data (load_and_apply_factory_data()
+# in src/ble/ble_radio.c), so only the string buffer needs sizing here. PnP ID
+# is off — it exists for USB-style vendor/product lookup this device has no use
+# for.
+config BT_DIS_STR_MAX
+	default 64
+
+config BT_DIS_PNP
+	default n
+
+# TX MTU and RX buffer for SMP DFU throughput. Deliberately modest: the
+# NCS Matter defaults for DFU over SMP ask for 498/502, which costs
+# several KiB of RAM for a firmware update that is rare and not
+# latency-critical.
+config BT_L2CAP_TX_MTU
+	default 252
+
+# Must stay <= 251. Zephyr's BT_CTLR_DATA_LENGTH_MAX defaults to this value only
+# while it is <= 251 and otherwise falls to 27, so 256 would silently disable
+# Data Length Extension and chop every ATT payload into 27-byte link-layer
+# packets — ~12 per 252-byte SMP chunk instead of 2. Unlike BT_CTLR_TX_PWR_*
+# (see LOCK_BLE_TX_POWER_DBM) the SoftDevice Controller does consume this.
+#
+# Costs 5 bytes of negotiated ATT MTU, since BT_L2CAP_RX_MTU is this minus the
+# L2CAP header and the MTU is the MIN of the two directions.
+config BT_BUF_ACL_RX_SIZE
+	default 251
+
+# Raised from the SoftDevice Controller defaults of 2 RX / 3 TX, which cap what
+# a connection event can carry: at 2 RX buffers an SMP upload moved ~2 packets
+# per event however long the event ran. Six each keeps a 15-30 ms event busy at
+# the PDU size above. Costs ~1.8 KiB of RAM and nothing in battery terms — an
+# idle connection exchanges empty PDUs either way.
+config BT_CTLR_SDC_RX_PACKET_COUNT
+	default 6
+
+config BT_CTLR_SDC_TX_PACKET_COUNT
+	default 6
+
+config BT_BUF_ACL_TX_COUNT
+	default 6
+
+# Requested while the SMP characteristic is in use. Zephyr's defaults of 6/9
+# (7.5-11.25 ms) are below the 15 ms floor in Apple's Accessory Design
+# Guidelines, so iOS rejects them — and a peer rejection is not an error from
+# bt_conn_le_param_update(), so smp_bt.c never retries and the link silently
+# stays at 250 ms. That was the dominant term in a ~0.03 kB/s DFU.
+#
+# 15-30 ms satisfies Apple's rules. Applies only during a transfer: smp_bt.c
+# restores BT_PERIPHERAL_PREF_* five seconds after the last SMP packet.
+config MCUMGR_TRANSPORT_BT_CONN_PARAM_CONTROL_MIN_INT
+	default 12
+
+config MCUMGR_TRANSPORT_BT_CONN_PARAM_CONTROL_MAX_INT
+	default 24
+
+endif # LOCK_RADIO_BLE
+
+if LOCK_RADIO_MATTER
+
+config CHIP_DEVICE_PRODUCT_NAME
+	default "LowKey"
+
+config CHIP_DEVICE_PRODUCT_ID
+	default 32768
+
+config NCS_SAMPLE_MATTER_ZAP_FILE_PATH
+	default "${APPLICATION_CONFIG_DIR}/src/matter/lock.zap"
+
+choice STD_CPP
+	default STD_CPP17
+endchoice
+
+config CHIP_BLE_EXT_ADVERTISING
+	default y
+
+# In minutes, not seconds: the SDK multiplies this by 60 to get
+# CHIP_DEVICE_CONFIG_DISCOVERY_TIMEOUT_SECS. An hour of commissionable
+# advertising out of the box, so a lock can be installed and set up in
+# separate sittings. Only applies until the first fabric exists; after
+# that, a window is opened by a button press for
+# LOCK_DISCOVERY_TIMEOUT_S.
+config CHIP_BLE_ADVERTISING_DURATION
+	default 60
+
+# This hardware has no NFC antenna: the nRF54L15 NFCT pins (P1.02/P1.03)
+# are repurposed as the user keys (nfct-pins-as-gpios), so the NFCT
+# peripheral is disabled. Matter enables sharing the onboarding payload
+# over an NFC tag by default, which pulls in the NFC Type-2-Tag library
+# and then fails to link against the absent nrfx_nfct / nfc_platform
+# driver. Turn it off — commissioning is via BLE + the QR/manual code.
+config CHIP_NFC_ONBOARDING_PAYLOAD
+	default n
+
+# ── Thread as MTD/SED ────────────────────────────────────────────────
+choice OPENTHREAD_DEVICE_TYPE
+	default OPENTHREAD_MTD
+endchoice
+
+config CHIP_ENABLE_ICD_SUPPORT
+	default y
+
+# The ceiling for the QFN package this board uses — the datasheet's +8 dBm is
+# CSP-only, and there is no PA/FEM here.
+#
+# Do NOT raise this to 8 expecting a clamp. The nrf_802154 driver clamps only to
+# the highest RADIO.TXPOWER value the SoC defines, and nrf54l15_types.h defines
+# both Pos7dBm and Pos8dBm because the register field is per-die, not
+# per-package — so 8 programs a level this part is not characterised for.
+#
+# Only improves lock -> router. Inbound commands are governed by the router's TX
+# power and our receive sensitivity, which nothing here changes.
+config OPENTHREAD_DEFAULT_TX_POWER
+	default 7
+
+# ── ICD responsiveness ───────────────────────────────────────────────
+# The lock sleeps with its radio off, so the parent router buffers every inbound
+# frame until we poll. Inbound latency is bounded by the poll interval; outbound
+# reporting is unaffected and always immediate.
+#
+# The NCS defaults (2500 slow / 500 fast / 300 active) are self-defeating: fast
+# poll > active mode duration means the window expires before a single fast poll
+# can fire, so every round trip of a multi-message exchange pays the full
+# 2500 ms and a CASE handshake costs ~7.5 s. These give the active window room
+# to cover a handshake.
+#
+# Deliberately not SSED/CSL: Matter's SSED path only calls otLinkSetCslPeriod,
+# never otLinkSetPollPeriod, so the poll period freezes at boot and the
+# active/idle machinery becomes a no-op. CSL also needs a Thread 1.2+ parent
+# with enhanced keep-alive, and the parent changes as the mesh re-forms; when
+# unsupported it silently disables and falls back to a child-timeout-derived
+# period of minutes, i.e. the lock looks dead.
+config CHIP_ICD_SLOW_POLL_INTERVAL
+	default 500
+
+config CHIP_ICD_FAST_POLLING_INTERVAL
+	default 200
+
+config CHIP_ICD_ACTIVE_MODE_DURATION
+	default 2000
+
+config CHIP_ICD_ACTIVE_MODE_THRESHOLD
+	default 1000
+
+# ── Factory Data ─────────────────────────────────────────────────────
+# _BUILD stays off so the build does not bake Kconfig-derived factory data into
+# merged.hex at the same partition: every app flash would overwrite the
+# per-device data provisioned by scripts/generate_factory_data.py with SDK
+# sample defaults, and the generated secrets exist nowhere else.
+config CHIP_FACTORY_DATA
+	default y
+
+config CHIP_FACTORY_DATA_BUILD
+	default n
+
+# ── Test event triggers ──────────────────────────────────────────────
+# A certification feature, on by default in the NCS Matter common code, which
+# reads a 16-byte enable key from factory data at server init. We generate no
+# such key, so leaving it on aborts init with
+# CHIP_ERROR_PERSISTED_STORAGE_VALUE_NOT_FOUND (0xa0). Nothing in the
+# production path — OTA, fabric removal, factory reset, reboot — needs it.
+config NCS_SAMPLE_MATTER_TEST_EVENT_TRIGGERS
+	default n
+
+endif # LOCK_RADIO_MATTER
+
+# ─────────────────────────────────────────────────────────────────────
+# Both radios: making Bluetooth hold two tenants
+# ─────────────────────────────────────────────────────────────────────
+# Matter owns the Bluetooth stack and advertises for commissioning through its
+# BLEAdvertisingArbiter — a single time-multiplexed advertiser that stamps one
+# identity on every request. Routing our services through it would mean no
+# persistent bonds (why CONFIG_CHIP_NUS forces BT_BONDABLE=n) and no
+# reachability during a commissioning window.
+#
+# Instead the two take separate identities. BLEManagerImpl picks identity 1 for
+# CHIPoBLE whenever BT_BONDABLE is set, leaving identity 0 to the application,
+# so both advertise at once and our bonds sit where Matter never looks — which
+# matters, because it calls bt_id_reset() on identity 1 on every boot after the
+# first, unpairing everything bonded there.
+if LOCK_RADIO_BLE && LOCK_RADIO_MATTER
+
+# Identity 0 is ours, identity 1 is Matter's.
+config BT_ID_MAX
+	default 2
+
+# One advertising set each. Ours is created explicitly; Matter's arbiter
+# uses the legacy set.
+config BT_EXT_ADV_MAX_ADV_SET
+	default 2
+
+# Keeps the controller's per-set memory at its lower tier; nothing we
+# advertise needs more than a legacy payload.
+config BT_CTLR_ADV_DATA_LEN_MAX
+	default 31
+
+# One commissioning link plus one application link. Matter defaults this
+# to 1, which is why Nordic's own NUS integration cannot run during
+# commissioning.
+config BT_MAX_CONN
+	default 2
+
+# Matter's own formula, from its Kconfig.defaults: 6 - (BT_MAX_CONN + 1).
+config BT_BUF_ACL_RX_COUNT_EXTRA
+	default 3
+
+# CHIPoBLE characteristics are unencrypted, so a commissioner has no
+# reason to pair — but some phone stacks bond opportunistically, and with
+# BT_APP_PASSKEY on that would stall commissioning behind a passkey
+# prompt. Enabling this lets us refuse pairing that arrives on Matter's
+# identity.
+config BT_SMP_APP_PAIRING_ACCEPT
+	default y
+
+# Stack sizes NCS recommends for nRF54L with Bluetooth security enabled;
+# SMP requests are processed on the system workqueue.
+config BT_RX_STACK_SIZE
+	default 2560
+
+config SYSTEM_WORKQUEUE_STACK_SIZE
+	default 2048
+
+# The nrfconnect default (y) makes DoFactoryReset call zms_clear() on the whole
+# settings partition, bt/ subtree included. Off, the selective path deletes only
+# the CHIP subtree, so a lock removed from its fabric — or one whose
+# commissioning failed, which ends at zero fabrics and the same action — keeps
+# its BLE bonds. The button path still clears both, calling each backend's own
+# factory_reset(). Trade noted in the SDK's help text: whole-page erase is the
+# more robust way to recover a settings partition left in a bad state.
+config CHIP_FACTORY_RESET_ERASE_SETTINGS
+	default n
+
+# Routes SMP DFU through Matter's DFUSync mutex so an SMP upload and a
+# Matter OTA cannot both write the secondary slot; the loser gets a clean
+# EBUSY. Also registers the image-confirm hooks.
+config CHIP_DFU_OVER_BT_SMP
+	default y
+
+# CHIP_DFU_OVER_BT_SMP defaults this choice to plain read/write, where a
+# BLE-only build gets the authenticated variant for free from BT_SMP. Firmware
+# upload should require a paired, encrypted link; src/ble/ble_radio.c carries a
+# BUILD_ASSERT so it cannot regress silently.
+choice MCUMGR_TRANSPORT_BT_PERM
+	default MCUMGR_TRANSPORT_BT_PERM_RW_AUTHEN
+endchoice
+
+# MCUMGR_TRANSPORT_NETBUF_SIZE/_COUNT are deliberately left alone: this device
+# has the RAM headroom, so CHIP_DFU_OVER_BT_SMP's 1024/6 stands. The count is
+# how many SMP requests can be in flight, and Zephyr's default of 2 leaves the
+# client unable to pipeline — the next bottleneck after the connection interval.
+# Note a BLE-only build has neither symbol and gets Zephyr's 384/4.
+
+endif # LOCK_RADIO_BLE && LOCK_RADIO_MATTER
+
+if CHIP
+
+config NCS_SAMPLE_MATTER_PERSISTENT_STORAGE
+	default y
+
+# Software version, derived from the git version by CMakeLists.txt and passed
+# in via the environment. The numeric form is decimal MMmmpp so a newer tag is
+# always a larger number (what Matter OTA compares); the string is the raw
+# `git describe` output. Overrides the SDK defaults (0 / "prerelease").
+config CHIP_DEVICE_SOFTWARE_VERSION
+	default "$(LOWKEY_SW_VERSION)"
+
+config CHIP_DEVICE_SOFTWARE_VERSION_STRING
+	default "$(LOWKEY_SW_VERSION_STR)"
+
+endif # CHIP
+
+if OPENTHREAD
+
+choice OPENTHREAD_NORDIC_LIBRARY_CONFIGURATION
+	default OPENTHREAD_NORDIC_LIBRARY_MTD
+endchoice
+
+endif # OPENTHREAD
+
+if CHIP
+source "$(ZEPHYR_CONNECTEDHOMEIP_MODULE_DIR)/config/nrfconnect/chip-module/Kconfig.features"
+source "$(ZEPHYR_CONNECTEDHOMEIP_MODULE_DIR)/config/nrfconnect/chip-module/Kconfig.defaults"
+source "$(ZEPHYR_NRF_MODULE_DIR)/samples/matter/common/src/Kconfig"
+endif # CHIP
+
+source "Kconfig.zephyr"

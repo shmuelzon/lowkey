@@ -1,0 +1,22 @@
+description: |
+  MAX17205 Stand-Alone ModelGauge m5 Multi-Cell Fuel Gauge with SHA-256
+  Authentication and Optional Protector Interface.
+
+compatible: "maxim,max17205"
+
+include: i2c-device.yaml
+
+properties:
+  sense-resistor-micro-ohms:
+    type: int
+    required: true
+    description: Current sense resistor value in micro-ohms.
+
+  charge-term-current-microamp:
+    type: int
+    default: 250000
+    description: |
+      Charge-termination current of the board's charger (e.g. the BQ25886
+      ITERM setting), in microamps. Written to the MAX17205 IChgTerm register
+      for ModelGauge m5 end-of-charge detection. This is a fixed property of
+      the charging hardware, not of the (user-selectable) battery pack.

@@ -1,0 +1,8 @@
+# Vendor prefixes for the LowKey board. This whole dts/bindings tree lives under
+# the board directory because that is a DTS root for every image targeting the
+# board, MCUboot included — bindings under the application root are invisible to
+# MCUboot, whose application root is the bootloader's own source directory, and
+# it would warn about the unknown compatibles.
+# Zephyr merges this with its in-tree dts/bindings/vendor-prefixes.txt.
+shmuelzon	Shmuelzon
+lowkey	LowKey

@@ -1,0 +1,22 @@
+description: Motor driver GPIO interface (e.g. DRV8837 / DRV8871 H-bridge)
+
+compatible: "lowkey,motor-driver"
+
+properties:
+  nsleep-gpios:
+    type: phandle-array
+    required: false
+    description: |
+      nSLEEP enable pin (active high = awake, low = sleep). Optional: drivers
+      such as the DRV8837 (PCB rev A) need it, while the DRV8871 (rev B) sleeps
+      automatically and leaves this unpopulated.
+
+  in1-gpios:
+    type: phandle-array
+    required: true
+    description: H-bridge input 1
+
+  in2-gpios:
+    type: phandle-array
+    required: true
+    description: H-bridge input 2

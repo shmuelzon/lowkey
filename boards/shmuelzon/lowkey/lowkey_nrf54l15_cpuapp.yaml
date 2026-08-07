@@ -1,0 +1,19 @@
+# Copyright (c) 2024 Nordic Semiconductor ASA
+# SPDX-License-Identifier: Apache-2.0
+
+identifier: lowkey/nrf54l15/cpuapp
+name: LowKey-nRF54L15-Application
+type: mcu
+arch: arm
+toolchain:
+  - gnuarmemb
+  - zephyr
+sysbuild: true
+# Both reclaimed from the unused FLPR coprocessor; see the board .dts.
+ram: 256
+flash: 1524
+supported:
+  - adc
+  - gpio
+  - i2c
+  - watchdog

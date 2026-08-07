@@ -1,0 +1,14 @@
+/*
+ * LowKey PCB revision A.
+ *
+ * Motor driver: TI DRV8837 low-voltage H-bridge. Unlike the DRV8871 on
+ * rev B, the DRV8837 has a dedicated nSLEEP input that must be driven high
+ * to enable the outputs, so this revision adds the nsleep-gpios pin on top
+ * of the common IN1/IN2 wiring in the base *.dts.
+ */
+
+#include <zephyr/dt-bindings/gpio/nordic-nrf-gpio.h>
+
+&motor_driver {
+	nsleep-gpios = <&gpio1 4 GPIO_ACTIVE_HIGH>;  /* P1.04 */
+};

@@ -1,0 +1,46 @@
+board:
+  name: lowkey
+  full_name: LowKey
+  vendor: shmuelzon
+  # PCB revisions. The base *.dts describes the wiring common to every
+  # revision; each revision's delta lives in
+  # lowkey_nrf54l15_cpuapp_<rev>.overlay, applied on top of the base.
+  #   rev A: DRV8837 H-bridge — needs an nSLEEP enable GPIO.
+  #   rev B: DRV8871 H-bridge — same IN1/IN2, sleeps automatically (no nSLEEP).
+  # Default is A, the revision used for testing/debugging.
+  revision:
+    format: letter
+    default: "A"
+    revisions:
+      - name: "A"
+      - name: "B"
+  socs:
+    - name: nrf54l15
+runners:
+  run_once:
+    '--recover':
+      - runners:
+          - nrfjprog
+          - nrfutil
+        run: first
+        groups:
+          - boards:
+              - lowkey/nrf54l15/cpuapp
+    '--erase':
+      - runners:
+          - nrfjprog
+          - jlink
+          - nrfutil
+        run: first
+        groups:
+          - boards:
+              - lowkey/nrf54l15/cpuapp
+    '--reset':
+      - runners:
+          - nrfjprog
+          - jlink
+          - nrfutil
+        run: last
+        groups:
+          - boards:
+              - lowkey/nrf54l15/cpuapp

@@ -1,0 +1,18 @@
+choice BOOTLOADER
+	default BOOTLOADER_MCUBOOT
+endchoice
+
+if BOOTLOADER_MCUBOOT
+
+config PM_OVERRIDE_EXTERNAL_DRIVER_CHECK
+	default y
+
+config DFU_MULTI_IMAGE_PACKAGE_BUILD
+	default y
+
+config DFU_MULTI_IMAGE_PACKAGE_APP
+	default y
+
+endif # BOOTLOADER_MCUBOOT
+
+source "share/sysbuild/Kconfig"

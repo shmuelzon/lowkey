@@ -1,0 +1,288 @@
+/*
+ * Copyright (c) 2024 Nordic Semiconductor ASA
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/dts-v1/;
+
+#include <nordic/nrf54l15_cpuapp.dtsi>
+#include <zephyr/dt-bindings/gpio/nordic-nrf-gpio.h>
+#include "lowkey-pinctrl.dtsi"
+
+/*
+ * LowKey board — Ezurio BL54L15 module (P/N 453-00044) carrying the
+ * nRF54L15 SoC. Same silicon and module as the BL54L15 DVK, so the SoC-level
+ * configuration (clocks, RRAM, GRTC, radio) mirrors that board; the rest of
+ * this file describes the product's own wiring. The module has a single fixed
+ * antenna (MHF4), so there is no RF switch to manage. There is no wired debug
+ * UART — debugging is over the SWD back-channel (RTT).
+ */
+
+/ {
+	compatible = "shmuelzon,lowkey_nrf54l15-cpuapp";
+	model = "Shmuelzon LowKey nRF54L15 Application MCU";
+
+	/*
+	 * No zephyr,console or zephyr,*-uart: this board has no wired debug
+	 * UART and enables no UARTE, so pointing them at a disabled node would
+	 * only mislead. Debug output goes over RTT (see overlay-debug.conf).
+	 */
+	chosen {
+		zephyr,code-partition = &slot0_partition;
+		zephyr,sram = &cpuapp_sram;
+		zephyr,flash-controller = &rram_controller;
+		zephyr,flash = &cpuapp_rram;
+		zephyr,ieee802154 = &ieee802154;
+	};
+
+	aliases {
+		led0 = &status_led;
+		key0 = &key0;
+		key1 = &key1;
+		watchdog0 = &wdt31;
+
+		/* Position sensors */
+		lock-sensor   = &lock_sensor;
+		unlock-sensor = &unlock_sensor;
+		door-sensor   = &door_sensor;
+
+		/* Charger status */
+		chg-power-good = &chg_power_good;
+		chg-stat       = &chg_stat;
+	};
+
+	/* Status LED — P2.03, active-low (MCU sinks current). */
+	leds {
+		compatible = "gpio-leds";
+
+		status_led: status-led {
+			gpios = <&gpio2 3 GPIO_ACTIVE_LOW>;
+			label = "Status LED";
+		};
+	};
+
+	/*
+	 * User keys — active-low with internal pull-up. The firmware reaches
+	 * these through the key0/key1 aliases and debounces them itself
+	 * (src/gpio_input.c); CONFIG_INPUT is off, so the gpio-keys compatible
+	 * and zephyr,code below are conventional rather than consumed.
+	 */
+	buttons {
+		compatible = "gpio-keys";
+
+		key0: key-0 {
+			/* P1.02 — button 0 (discovery / factory reset) */
+			gpios = <&gpio1 2 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+			zephyr,code = <0>;
+		};
+		key1: key-1 {
+			/* P1.03 — button 1 */
+			gpios = <&gpio1 3 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+			zephyr,code = <1>;
+		};
+	};
+
+	/*
+	 * Motor driver (H-bridge). IN1/IN2 are common to every PCB revision;
+	 * the revision overlay adds any revision-specific pins:
+	 *   rev A (DRV8837): adds nsleep-gpios (P1.04) — see ..._A.overlay
+	 *   rev B (DRV8871): auto-sleep, no nSLEEP  — see ..._B.overlay
+	 */
+	motor_driver: motor-driver {
+		compatible = "lowkey,motor-driver";
+		in1-gpios = <&gpio1 5 GPIO_ACTIVE_HIGH>;  /* P1.05 */
+		in2-gpios = <&gpio1 6 GPIO_ACTIVE_HIGH>;  /* P1.06 */
+	};
+
+	/*
+	 * Hall-effect sensors (push-pull output, active-low). On P1 for
+	 * GPIOTE20 interrupt-driven wake-from-sleep. No pull-up: the push-pull
+	 * stage would waste current fighting it.
+	 */
+	lock_sensors {
+		compatible = "gpio-keys";
+
+		lock_sensor: lock-sensor {
+			/* P1.11 — bolt fully extended (locked) */
+			gpios = <&gpio1 11 GPIO_ACTIVE_LOW>;
+			zephyr,code = <2>;
+		};
+		unlock_sensor: unlock-sensor {
+			/* P1.12 — bolt fully retracted (unlocked) */
+			gpios = <&gpio1 12 GPIO_ACTIVE_LOW>;
+			zephyr,code = <3>;
+		};
+		door_sensor: door-sensor {
+			/* P1.13 — door closed */
+			gpios = <&gpio1 13 GPIO_ACTIVE_LOW>;
+			zephyr,code = <4>;
+		};
+	};
+
+	/*
+	 * Charger status inputs. Both are open-drain active-low; internal
+	 * pull-ups are enabled on the nRF54L15 side.
+	 *
+	 * PG (power-good): LOW = input power connected.
+	 * STAT: LOW = charge in progress, HIGH = charge complete.
+	 */
+	charger_status {
+		compatible = "gpio-keys";
+
+		chg_power_good: chg-power-good {
+			/* P1.07 — GPIOTE20 wake-capable */
+			gpios = <&gpio1 7 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+			zephyr,code = <5>;
+		};
+		chg_stat: chg-stat {
+			/* P0.02 — GPIOTE30 wake-capable */
+			gpios = <&gpio0 2 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+			zephyr,code = <6>;
+		};
+	};
+};
+
+/*
+ * nrf54l15.dtsi gives cpuapp 188 KiB of the SoC's 256 KiB SRAM and reserves the
+ * top 68 KiB as cpuflpr_sram. This product never starts the FLPR core, so take
+ * it back — the same override Nordic ships for the parts where FLPR is
+ * unsupported. cpuflpr_sram is left in place and now overlaps this region;
+ * anything that wants the FLPR back must shrink this reg first.
+ *
+ * Not only headroom: CONFIG_RAM_POWER_DOWN_LIBRARY powers down whole 32 KiB
+ * sections above _image_ram_end, and at 188 KiB there was never a complete
+ * section free, so the option did nothing at all. Each 32 KiB of RAM the image
+ * gives back is one more section powered down, so the practical budget is well
+ * under 256 KiB — a combined Matter + BLE build currently sits at ~199 KiB and
+ * frees exactly one section.
+ */
+&cpuapp_sram {
+	reg = <0x20000000 DT_SIZE_K(256)>;
+	ranges = <0x0 0x20000000 DT_SIZE_K(256)>;
+};
+
+/*
+ * The RRAM half of the same trade: cpuapp gets the low 1428 KiB of 1524 KiB,
+ * with the top 96 KiB reserved as cpuflpr_rram.
+ *
+ * Unlike the SRAM reclaim this is load-bearing rather than headroom.
+ * pm_static.yml spans the full 1524 KiB, so every image Partition Manager lays
+ * out needs this same override or the layout overflows flash_primary and the
+ * build fails — which is why it is repeated verbatim in
+ * sysbuild/mcuboot/app.overlay, whose devicetree never sees this file.
+ */
+&cpuapp_rram {
+	reg = <0x0 DT_SIZE_K(1524)>;
+};
+
+&lfxo {
+	load-capacitors = "internal";
+	load-capacitance-femtofarad = <15500>;
+};
+
+&hfxo {
+	load-capacitors = "internal";
+	load-capacitance-femtofarad = <15000>;
+};
+
+&regulators {
+	status = "okay";
+};
+
+&vregmain {
+	status = "okay";
+	regulator-initial-mode = <NRF5X_REG_MODE_DCDC>;
+};
+
+&grtc {
+	owned-channels = <0 1 2 3 4 5 6 7 8 9 10 11>;
+	/*
+	 * Channels 7-11 reserved for Zero Latency IRQs. Channels 3-4 are the
+	 * SoC's FLPR reservation; the FLPR core is unused here (see the
+	 * cpuapp_sram override above) but the channels are left ceded because
+	 * nothing needs them and the SDK default expects them free.
+	 */
+	child-owned-channels = <3 4 7 8 9 10 11>;
+	status = "okay";
+};
+
+&gpio0 {
+	status = "okay";
+};
+
+&gpio1 {
+	status = "okay";
+};
+
+&gpio2 {
+	status = "okay";
+};
+
+&gpiote20 {
+	status = "okay";
+};
+
+&gpiote30 {
+	status = "okay";
+};
+
+&radio {
+	status = "okay";
+};
+
+&ieee802154 {
+	status = "okay";
+};
+
+&temp {
+	status = "okay";
+};
+
+&clock {
+	status = "okay";
+};
+
+&adc {
+	status = "okay";
+};
+
+/*
+ * MAX17205 fuel gauge on I2C30. uart30 shares the SERIAL30 peripheral and is
+ * left disabled so this bus can own P0.00/P0.01.
+ */
+&i2c30 {
+	status = "okay";
+	pinctrl-0 = <&i2c30_default>;
+	pinctrl-1 = <&i2c30_sleep>;
+	pinctrl-names = "default", "sleep";
+
+	max17205: max17205@36 {
+		compatible = "maxim,max17205";
+		reg = <0x36>;
+		sense-resistor-micro-ohms = <10000>;          /* 10 mOhm */
+		charge-term-current-microamp = <103000>;      /* BQ25886 ITERM = 103 mA */
+		status = "okay";
+	};
+};
+
+/* Hardware watchdog for production reliability. */
+&wdt31 {
+	status = "okay";
+};
+
+/*
+ * Reclaim the NFC antenna pins (P1.02 / P1.03) as ordinary GPIOs for the two
+ * user keys (key0/key1). On the nRF54L15 these pins power up in NFC mode: the
+ * NFCT pad network is connected and holds them low, overriding the GPIO
+ * pull-ups, so the keys read stuck-low even though PIN_CNF is correct.
+ * Disabling the nfct node is not enough — the pads must be taken off NFCT.
+ * This property makes SoC startup (system_nrf54l.c) program
+ * NRF_NFCT->PADCONFIG = Disabled on every boot, freeing the pins as GPIO.
+ */
+&uicr {
+	nfct-pins-as-gpios;
+};
+
+/* Include default memory partition configuration file */
+#include <nordic/nrf54l15_partition.dtsi>

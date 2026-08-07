@@ -1,0 +1,27 @@
+/ {
+	chosen {
+		zephyr,code-partition = &boot_partition;
+	};
+};
+
+/*
+ * Hand the unused FLPR coprocessor's 96 KiB of RRAM to the application core.
+ * Partition Manager lays out one map for every image and pm_static.yml spans
+ * the full 1524 KiB, so MCUboot has to agree about how much RRAM exists.
+ * Needed here rather than left to the board, because MCUboot's configuration
+ * directory is sysbuild/mcuboot/ and the overlays under boards/ never reach it.
+ * See boards/shmuelzon/lowkey/lowkey_nrf54l15_cpuapp.dts for the rationale.
+ */
+&cpuapp_rram {
+	reg = <0x0 DT_SIZE_K(1524)>;
+};
+
+/*
+ * Only matters on a board that enables uart21: if the UARTE driver initialises
+ * during MCUboot, its pins latch as UART-TX-idle-high and that hardware state
+ * persists into the application, overriding GPIO output. Boards that put motor
+ * control on those pins would drive the motor at boot.
+ */
+&uart21 {
+	status = "disabled";
+};

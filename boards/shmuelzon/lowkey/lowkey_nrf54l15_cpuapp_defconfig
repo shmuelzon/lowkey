@@ -1,0 +1,11 @@
+# Copyright (c) 2024 Nordic Semiconductor ASA
+# Copyright (c) 2026 Assaf Inbal
+# SPDX-License-Identifier: Apache-2.0
+
+# No UART is enabled on this board, so no console is configured here either.
+# Debug output goes over the SWD back-channel (RTT) — see overlay-debug.conf.
+
+CONFIG_GPIO=y
+
+CONFIG_ARM_MPU=y
+CONFIG_HW_STACK_PROTECTION=y

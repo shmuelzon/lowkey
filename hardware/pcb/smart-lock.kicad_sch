@@ -1,0 +1,203 @@
+(kicad_sch
+	(version 20260306)
+	(generator "eeschema")
+	(generator_version "10.0")
+	(uuid "ffa1b3d6-c65b-4980-8fb7-e06ef91e20c0")
+	(paper "A4")
+	(title_block
+		(title "Smart Lock")
+		(date "2026-04-10")
+		(rev "1.0")
+	)
+	(lib_symbols)
+	(sheet
+		(at 162.56 33.02)
+		(size 27.94 41.91)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(stroke
+			(width 0.1524)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0)
+		)
+		(uuid "57c338ca-a207-4cbc-9894-3ecd633e673b")
+		(property "Sheetname" "Debug & Connectors"
+			(at 162.56 32.3084 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left bottom)
+			)
+		)
+		(property "Sheetfile" "debug_and_connectors.kicad_sch"
+			(at 162.56 75.5146 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left top)
+			)
+		)
+		(instances
+			(project "smart-lock"
+				(path "/ffa1b3d6-c65b-4980-8fb7-e06ef91e20c0"
+					(page "5")
+				)
+			)
+		)
+	)
+	(sheet
+		(at 85.09 33.02)
+		(size 33.02 40.64)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(stroke
+			(width 0.1524)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0)
+		)
+		(uuid "7177efe3-63a5-4a07-9d44-85028aed7d0d")
+		(property "Sheetname" "Power"
+			(at 85.09 32.3084 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left bottom)
+			)
+		)
+		(property "Sheetfile" "power.kicad_sch"
+			(at 85.09 74.2446 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left top)
+			)
+		)
+		(instances
+			(project "smart-lock"
+				(path "/ffa1b3d6-c65b-4980-8fb7-e06ef91e20c0"
+					(page "3")
+				)
+			)
+		)
+	)
+	(sheet
+		(at 48.26 33.02)
+		(size 31.75 40.64)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(stroke
+			(width 0.1524)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0)
+		)
+		(uuid "cca471f1-df9d-4959-a572-9880000e6197")
+		(property "Sheetname" "nRF54L15"
+			(at 48.26 32.3084 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left bottom)
+			)
+		)
+		(property "Sheetfile" "nrf54l15.kicad_sch"
+			(at 48.26 74.2446 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left top)
+			)
+		)
+		(instances
+			(project "smart-lock"
+				(path "/ffa1b3d6-c65b-4980-8fb7-e06ef91e20c0"
+					(page "2")
+				)
+			)
+		)
+	)
+	(sheet
+		(at 125.73 33.02)
+		(size 31.75 40.64)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(stroke
+			(width 0.1524)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0)
+		)
+		(uuid "d738da87-0ff2-4abc-87b9-a5138fd304c2")
+		(property "Sheetname" "Peripherals"
+			(at 125.73 32.3084 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left bottom)
+			)
+		)
+		(property "Sheetfile" "peripherals.kicad_sch"
+			(at 125.73 74.2446 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left top)
+			)
+		)
+		(instances
+			(project "smart-lock"
+				(path "/ffa1b3d6-c65b-4980-8fb7-e06ef91e20c0"
+					(page "4")
+				)
+			)
+		)
+	)
+	(sheet_instances
+		(path "/"
+			(page "1")
+		)
+	)
+	(embedded_fonts no)
+)

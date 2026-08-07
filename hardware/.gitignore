@@ -1,0 +1,8 @@
+# KiCad per-user state, backups and caches
+pcb/*.kicad_prl
+pcb/*-backups/
+pcb/.history/
+pcb/fp-info-cache
+pcb/#auto_saved_files#
+pcb/_autosave-*
+*.lck
